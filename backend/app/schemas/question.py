@@ -18,6 +18,12 @@ class QuestionResponse(BaseModel):
         from_attributes = True
 
 
+class QuestionsMetadata(BaseModel):
+    requested: int
+    available: int
+    returned: int
+
+
 class TestAnswerSubmit(BaseModel):
     question_id: int
     user_answer: str

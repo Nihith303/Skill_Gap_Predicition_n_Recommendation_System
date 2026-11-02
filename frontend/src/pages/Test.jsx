@@ -46,13 +46,14 @@ const Test = () => {
         if (skillId) params.skillId = skillId;
         if (difficulty) params.difficulty = difficulty;
 
-        const data = await testService.getQuestions(params);
-        setQuestions(data);
+        const response = await testService.getQuestions(params);
+        const questions = response.questions || response; // Handle both old and new response format
+        setQuestions(questions);
         setStartTime(Date.now());
 
         // Initialize start time for first question
-        if (data.length > 0) {
-          setQuestionStartTime({ [data[0].id]: Date.now() });
+        if (questions.length > 0) {
+          setQuestionStartTime({ [questions[0].id]: Date.now() });
         }
       } catch (err) {
         setError(
@@ -93,8 +94,9 @@ const Test = () => {
       }
 
       // Move to next question
-      const nextQ = questions[currentQuestionIndex + 1];
-      setCurrentQuestionIndex(currentQuestionIndex + 1);
+      const nextIndex = currentQuestionIndex + 1;
+      const nextQ = questions[nextIndex];
+      setCurrentQuestionIndex(nextIndex);
 
       // Set start time for next question
       if (nextQ) {
@@ -119,8 +121,9 @@ const Test = () => {
       }
 
       // Move to previous question
-      const prevQ = questions[currentQuestionIndex - 1];
-      setCurrentQuestionIndex(currentQuestionIndex - 1);
+      const prevIndex = currentQuestionIndex - 1;
+      const prevQ = questions[prevIndex];
+      setCurrentQuestionIndex(prevIndex);
 
       // Set start time for previous question
       if (prevQ) {
@@ -133,7 +136,8 @@ const Test = () => {
   };
 
   const handleSubmit = async () => {
-    if (Object.keys(answers).length < questions.length) {
+    const validQuestions = questions.filter(q => q);
+    if (Object.keys(answers).length < validQuestions.length) {
       setError('Please answer all questions before submitting.');
       return;
     }
@@ -155,7 +159,7 @@ const Test = () => {
       const timeTaken = Math.floor((Date.now() - startTime) / 1000);
       const testData = {
         time_taken_seconds: timeTaken,
-        answers: questions.map((q) => ({
+        answers: validQuestions.map((q) => ({
           question_id: q.id,
           user_answer: answers[q.id] || '',
           time_taken_seconds: questionTimes[q.id] || 0,
@@ -176,12 +180,25 @@ const Test = () => {
   };
 
   const currentQuestion = questions[currentQuestionIndex];
-  const progress = ((currentQuestionIndex + 1) / questions.length) * 100;
+  const progress = questions.length > 0 ? ((currentQuestionIndex + 1) / questions.length) * 100 : 0;
 
   if (loading) {
     return (
       <Box display="flex" justifyContent="center" alignItems="center" minHeight="400px">
         <CircularProgress />
+      </Box>
+    );
+  }
+
+  if (questions.length === 0) {
+    return (
+      <Box>
+        <Alert severity="error" sx={{ mb: 3 }}>
+          No questions available. Please try again later or select different filters.
+        </Alert>
+        <Button variant="outlined" onClick={() => navigate('/dashboard')}>
+          Back to Dashboard
+        </Button>
       </Box>
     );
   }
@@ -217,14 +234,14 @@ const Test = () => {
             sx={{
               height: '100%',
               bgcolor: 'primary.main',
-              width: `${progress}%`,
+              width: `${Math.min(progress, 100)}%`,
               transition: 'width 0.3s ease',
             }}
           />
         </Box>
       </Box>
 
-      {currentQuestion && (
+      {currentQuestion ? (
         <Card sx={{ mb: 3 }}>
           <CardContent>
             <Box sx={{ mb: 2 }}>
@@ -255,14 +272,43 @@ const Test = () => {
                   value={answers[currentQuestion.id] || ''}
                   onChange={(e) => handleAnswerChange(currentQuestion.id, e.target.value)}
                 >
-                  {JSON.parse(currentQuestion.options).map((option, index) => (
-                    <FormControlLabel
-                      key={index}
-                      value={option}
-                      control={<Radio />}
-                      label={option}
-                    />
-                  ))}
+                  {(() => {
+                    try {
+                      const parsedOptions = JSON.parse(currentQuestion.options);
+                      if (!Array.isArray(parsedOptions) || parsedOptions.length === 0) {
+                        return (
+                          <Typography variant="body2" color="error">
+                            No valid options available for this question.
+                          </Typography>
+                        );
+                      }
+                      return parsedOptions.map((option, index) => (
+                        <FormControlLabel
+                          key={index}
+                          value={option}
+                          control={<Radio />}
+                          label={option}
+                        />
+                      ));
+                    } catch (e) {
+                      return (
+                        <Box>
+                          <Typography variant="body2" color="error" gutterBottom>
+                            Error loading options. Please type your answer below.
+                          </Typography>
+                          <TextField
+                            fullWidth
+                            multiline
+                            rows={3}
+                            variant="outlined"
+                            placeholder="Type your answer here..."
+                            value={answers[currentQuestion.id] || ''}
+                            onChange={(e) => handleAnswerChange(currentQuestion.id, e.target.value)}
+                          />
+                        </Box>
+                      );
+                    }
+                  })()}
                 </RadioGroup>
               </FormControl>
             ) : (
@@ -300,19 +346,23 @@ const Test = () => {
             )}
           </CardContent>
         </Card>
+      ) : (
+        <Alert severity="warning" sx={{ mb: 3 }}>
+          No question available at this position. Please navigate to a valid question.
+        </Alert>
       )}
 
       <Box sx={{ display: 'flex', justifyContent: 'space-between', mt: 3 }}>
         <Button
           variant="outlined"
           onClick={handlePrevious}
-          disabled={currentQuestionIndex === 0}
+          disabled={currentQuestionIndex === 0 || !currentQuestion}
           startIcon={<ArrowBack />}
         >
           Previous
         </Button>
         <Box>
-          {currentQuestionIndex === questions.length - 1 ? (
+          {currentQuestionIndex === questions.length - 1 || !questions[currentQuestionIndex + 1] ? (
             <Button
               variant="contained"
               onClick={handleSubmit}
@@ -326,6 +376,7 @@ const Test = () => {
               variant="contained"
               onClick={handleNext}
               endIcon={<ArrowForward />}
+              disabled={!currentQuestion}
             >
               Next
             </Button>
@@ -340,10 +391,12 @@ const Test = () => {
         <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
           {questions.map((q, index) => (
             <Button
-              key={q.id}
+              key={q?.id || index}
               variant={currentQuestionIndex === index ? 'contained' : 'outlined'}
               size="small"
               onClick={() => {
+                if (!q) return;
+
                 // Record time spent on current question
                 const currentQ = questions[currentQuestionIndex];
                 if (currentQ && questionStartTime[currentQ.id]) {
@@ -365,8 +418,9 @@ const Test = () => {
               }}
               sx={{
                 minWidth: 40,
-                bgcolor: answers[q.id] ? 'success.light' : undefined,
+                bgcolor: answers[q?.id] ? 'success.light' : undefined,
               }}
+              disabled={!q}
             >
               {index + 1}
             </Button>

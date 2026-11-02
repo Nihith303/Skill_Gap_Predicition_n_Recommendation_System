@@ -1,19 +1,19 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session, joinedload
-from typing import List
+from typing import List, Dict
 import random
 
 from app.db.database import get_db
 from app.models.user import User
 from app.models.question import Question
 from app.models.test_attempt import TestAttempt, TestAnswer
-from app.schemas.question import QuestionResponse, TestSubmit, TestAttemptResponse, TestAttemptDetailResponse
+from app.schemas.question import QuestionResponse, TestSubmit, TestAttemptResponse, TestAttemptDetailResponse, QuestionsMetadata
 from app.services.auth import get_current_user
 
 router = APIRouter(prefix="/api/test", tags=["Test"])
 
 
-@router.get("/questions", response_model=List[QuestionResponse])
+@router.get("/questions")
 def get_test_questions(
     skill_id: str = None,
     difficulty: str = None,
@@ -24,6 +24,7 @@ def get_test_questions(
     """
     Get questions for a test.
     Can filter by skill_id and/or difficulty.
+    Returns questions with metadata about the query.
     """
     query = db.query(Question)
 
@@ -32,19 +33,31 @@ def get_test_questions(
     if difficulty:
         query = query.filter(Question.difficulty == difficulty)
 
-    questions = query.all()
+    available_questions = query.all()
+    available_count = len(available_questions)
 
-    if not questions:
+    if not available_questions:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="No questions found matching the criteria"
         )
 
     # Randomly select questions if more than requested
-    if len(questions) > num_questions:
-        questions = random.sample(questions, num_questions)
+    if available_count > num_questions:
+        questions = random.sample(available_questions, num_questions)
+    else:
+        questions = available_questions
 
-    return questions
+    metadata = QuestionsMetadata(
+        requested=num_questions,
+        available=available_count,
+        returned=len(questions)
+    )
+
+    return {
+        "questions": questions,
+        "metadata": metadata
+    }
 
 
 @router.post("/submit", response_model=TestAttemptResponse)
